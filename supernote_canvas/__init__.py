@@ -167,6 +167,21 @@ def draw() -> None:
                 print(f"Failed to copy screenshot to '{dest_path}': {exc}")
                 return
 
+            # Attempt to honor EXIF orientation flags using Pillow, if available.
+            try:
+                from PIL import Image, ImageOps  # type: ignore
+
+                try:
+                    with Image.open(dest_path) as img:
+                        rotated = ImageOps.exif_transpose(img)
+                        rotated.save(dest_path)
+                except Exception as exc:
+                    # If anything goes wrong with EXIF-based rotation, continue without failing.
+                    print(f"Could not apply EXIF-based rotation: {exc}")
+            except Exception:
+                # Pillow is not installed or failed to import; skip EXIF handling.
+                pass
+
             # Build Markdown pointing to the new file.
             md = f"![Diagram]({dest_path})"
 
