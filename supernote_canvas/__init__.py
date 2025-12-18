@@ -15,8 +15,13 @@ import shutil
 from datetime import datetime
 from typing import Optional
 
-# Default configuration (can be overridden by editing the module after import)
-SUPERNOTE_URL: str = "http://192.168.2.148:8080"
+# Default configuration (can be overridden via env var or by editing the module
+# after import). The default URL is intentionally a non-personal placeholder;
+# most users should override this to point at their own Supernote web UI.
+SUPERNOTE_URL: str = os.getenv(
+    "SUPERNOTE_CANVAS_URL",
+    "http://192.168.0.100:8080",  # example private-LAN address; customize as needed
+)
 SCREENSHOT_DIR: str = os.path.expanduser("~/Desktop")
 DIAGRAM_DIR: str = "diagrams"
 

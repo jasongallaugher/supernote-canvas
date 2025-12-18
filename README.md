@@ -57,4 +57,46 @@ When you click **Capture**:
 
 You then manually create a new Markdown cell, paste the provided Markdown, and run the cell to embed your Supernote diagram in the notebook.
 
+## Configuration
+
+You will almost always want to tell Supernote Canvas where your Supernote web UI lives, and (optionally) where to look for screenshots and where to save diagrams.
+
+- **Supernote web UI URL**
+
+  By default, `SUPERNOTE_URL` is a generic private‑LAN placeholder. You should override it to your own device’s URL.
+
+  In a notebook cell:
+
+  ```python
+  import supernote_canvas
+
+  supernote_canvas.SUPERNOTE_URL = "http://192.168.1.23:8080"  # your Supernote's IP/port
+  ```
+
+  Or via environment variable (useful in Colab / hosted environments):
+
+  ```bash
+  export SUPERNOTE_CANVAS_URL="http://192.168.1.23:8080"
+  ```
+
+- **Screenshot source directory**
+
+  By default, Supernote Canvas looks for screenshots in `~/Desktop` on the machine running the kernel:
+
+  ```python
+  supernote_canvas.SCREENSHOT_DIR = "/path/to/your/screenshots"
+  ```
+
+  In Colab or other hosted Jupyter setups, this usually needs to be set to wherever you upload or save screenshots inside the runtime (for example, `/content` in Colab).
+
+- **Diagrams output directory**
+
+  By default, diagrams are saved into a `diagrams/` folder in the current working directory. You can change that if you prefer:
+
+  ```python
+  supernote_canvas.DIAGRAM_DIR = "images/diagrams"
+  ```
+
+These configuration knobs let you keep the library generic and public‑repo‑friendly, while still pointing at your own Supernote and filesystem layout when you actually use it.
+
 
