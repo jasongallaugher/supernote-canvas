@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supernote-canvas"
+version = "0.1.0"
+description = "Supernote Canvas: capture tablet sketches into Jupyter notebooks."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ipython",
+    "ipywidgets",
+]
+
+[project.urls]
+Homepage = "https://example.com/supernote-canvas"
+
+
