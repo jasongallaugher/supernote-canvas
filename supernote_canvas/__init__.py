@@ -373,7 +373,14 @@ def draw() -> None:
         {instruction_text}
       </p>
       <button 
-        onclick="document.getElementById('{iframe_id}').src = document.getElementById('{iframe_id}').src;"
+        onclick="
+          const iframe = document.getElementById('{iframe_id}');
+          const originalSrc = '{SUPERNOTE_URL}';
+          iframe.src = '';
+          setTimeout(() => {{
+            iframe.src = originalSrc + (originalSrc.includes('?') ? '&' : '?') + '_t=' + Date.now();
+          }}, 100);
+        "
         style="
           padding: 4px 8px;
           margin-bottom: 8px;
@@ -389,6 +396,9 @@ def draw() -> None:
       >
         🔄 Refresh iframe
       </button>
+      <p style="margin: 4px 0 8px; font-family: sans-serif; font-size: 11px; color: #999;">
+        If blocked, try: reload the Jupyter page (Cmd/Ctrl+R) or use Chrome with <code>--allow-running-insecure-content</code>
+      </p>
       <iframe
         id="{iframe_id}"
         src="{SUPERNOTE_URL}"
