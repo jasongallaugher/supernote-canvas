@@ -528,13 +528,31 @@ def draw() -> None:
 
             # Priority 2: Try file upload (remote environments)
             if image_data is None and is_remote and upload_widget:
-                if upload_widget.value:
-                    # Get the first (and only) uploaded file
-                    uploaded_file = list(upload_widget.value.values())[0]
-                    image_data = uploaded_file["content"]
-                    source_path = uploaded_file.get("metadata", {}).get("name", "")
-                    capture_method = "file upload"
-                    print(f"✓ Captured via {capture_method}")
+                try:
+                    # FileUpload widget value is a dict with file metadata
+                    if upload_widget.value:
+                        # Handle different possible structures
+                        if isinstance(upload_widget.value, dict):
+                            # Get the first (and only) uploaded file
+                            file_list = list(upload_widget.value.values())
+                            if file_list:
+                                uploaded_file = file_list[0]
+                                # Handle both dict format and tuple format
+                                if isinstance(uploaded_file, dict):
+                                    image_data = uploaded_file.get("content")
+                                    source_path = uploaded_file.get("metadata", {}).get("name", "")
+                                elif isinstance(uploaded_file, tuple) and len(uploaded_file) >= 2:
+                                    # Format: (content, metadata)
+                                    image_data = uploaded_file[0]
+                                    source_path = uploaded_file[1].get("name", "") if len(uploaded_file) > 1 else ""
+                                
+                                if image_data:
+                                    capture_method = "file upload"
+                                    print(f"✓ Captured via {capture_method}")
+                except Exception as exc:
+                    print(f"Error reading uploaded file: {exc}")
+                    import traceback
+                    traceback.print_exc()
 
             # Priority 3: Fallback to folder-based method (local environments)
             if image_data is None and not is_remote:
@@ -586,8 +604,16 @@ def draw() -> None:
         # Close the entire container so it disappears from the notebook output.
         container.close()
 
+    def _on_upload_change(change: dict) -> None:
+        """Handle file upload change - auto-trigger capture when file is uploaded."""
+        if change["new"] and upload_widget and upload_widget.value:
+            # File was uploaded, automatically trigger capture
+            _on_capture_click(capture_btn)
+
     capture_btn.on_click(_on_capture_click)
     close_btn.on_click(_on_close_click)
+    if upload_widget:
+        upload_widget.observe(_on_upload_change, names="value")
 
     display(container)
 
