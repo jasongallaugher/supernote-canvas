@@ -331,27 +331,83 @@ def _display_captured_image(dest_path: str) -> None:
     </button>
     """
 
-    # Display Markdown instructions with copy button.
-    display(HTML("<strong>Markdown to copy into a new markdown cell:</strong>"))
-    # Render as <code> block; escaping minimal HTML special chars.
-    safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    display(HTML(f"<code>{safe_md}</code>"))
-    display(HTML(copy_button_html))
-    
-    # Also provide HTML alternative for Colab (markdown may not work with local files)
+    # Check if we're in Colab - use IPython.display.Image() instead of markdown
     try:
         import google.colab  # type: ignore
-        html_alt = f'<img src="{md_path}" alt="Diagram" style="max-width: 100%;">'
-        display(HTML("<strong>Or use this HTML in a code cell:</strong>"))
-        display(HTML(f"<code>{html_alt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</code>"))
+        # In Colab, markdown doesn't work with local files, use code cell instead
+        code_snippet = f'from IPython import display\ndisplay.Image("{md_path}")'
+        display(HTML("<strong>Copy this code into a code cell:</strong>"))
+        safe_code = code_snippet.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        display(HTML(f"<code style='display: block; padding: 8px; background: #f5f5f5; border-radius: 4px;'>{safe_code}</code>"))
+        
+        # Create copy button for code snippet
+        js_safe_code = json.dumps(code_snippet)
+        code_copy_button = f"""
+        <button 
+            onclick="navigator.clipboard.writeText({js_safe_code}).then(() => {{
+                this.textContent = '✓ Copied!';
+                this.style.backgroundColor = '#28a745';
+                setTimeout(() => {{
+                    this.textContent = '📋 Copy Code';
+                    this.style.backgroundColor = '';
+                }}, 2000);
+            }}).catch(err => {{
+                const textarea = document.createElement('textarea');
+                textarea.value = {js_safe_code};
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {{
+                    document.execCommand('copy');
+                    this.textContent = '✓ Copied!';
+                    this.style.backgroundColor = '#28a745';
+                    setTimeout(() => {{
+                        this.textContent = '📋 Copy Code';
+                        this.style.backgroundColor = '';
+                    }}, 2000);
+                }} catch (err) {{
+                    alert('Failed to copy. Please copy manually.');
+                }}
+                document.body.removeChild(textarea);
+            }});"
+            style="
+                padding: 6px 12px;
+                margin: 8px 0;
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                font-family: sans-serif;
+            "
+            onmouseover="this.style.backgroundColor='#0056b3'"
+            onmouseout="this.style.backgroundColor='#007bff'"
+        >
+            📋 Copy Code
+        </button>
+        """
+        display(HTML(code_copy_button))
     except ImportError:
-        pass
+        # Not in Colab, use markdown
+        display(HTML("<strong>Markdown to copy into a new markdown cell:</strong>"))
+        # Render as <code> block; escaping minimal HTML special chars.
+        safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        display(HTML(f"<code>{safe_md}</code>"))
+        display(HTML(copy_button_html))
+    
     display(HTML("<strong>Preview (for reference only):</strong>"))
 
+    # Try IPython Image first, fallback to HTML img tag
     try:
         display(IPImage(filename=dest_path, width=800))
-    except Exception as exc:  # pragma: no cover - environment/display specific
-        print(f"Could not display image preview: {exc}")
+    except Exception:
+        # Fallback: use HTML img tag (works better in some environments)
+        try:
+            display(HTML(f'<img src="{md_path}" alt="Diagram preview" style="max-width: 800px; border: 1px solid #ddd; border-radius: 4px;">'))
+        except Exception as exc:  # pragma: no cover - environment/display specific
+            print(f"Could not display image preview: {exc}")
 
 
 
