@@ -240,10 +240,11 @@ def _process_and_save_image(
 
 
 def _display_captured_image(dest_path: str) -> None:
-    """Display the captured image with Markdown instructions."""
+    """Display the captured image with Markdown instructions and clipboard copy."""
     # Lazy import for display functions
     try:
         from IPython.display import HTML, Image as IPImage, display  # type: ignore
+        import json
     except Exception:
         print("Failed to import display dependencies")
         return
@@ -251,11 +252,64 @@ def _display_captured_image(dest_path: str) -> None:
     # Build Markdown pointing to the new file.
     md = f"![Diagram]({dest_path})"
 
-    # Display Markdown instructions and preview.
+    # Escape markdown for JavaScript using JSON encoding (safest method)
+    js_safe_md = json.dumps(md)
+
+    # Create copy button with JavaScript
+    copy_button_html = f"""
+    <button 
+        onclick="navigator.clipboard.writeText({js_safe_md}).then(() => {{
+            this.textContent = '✓ Copied!';
+            this.style.backgroundColor = '#28a745';
+            setTimeout(() => {{
+                this.textContent = '📋 Copy Markdown';
+                this.style.backgroundColor = '';
+            }}, 2000);
+        }}).catch(err => {{
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = {js_safe_md};
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {{
+                document.execCommand('copy');
+                this.textContent = '✓ Copied!';
+                this.style.backgroundColor = '#28a745';
+                setTimeout(() => {{
+                    this.textContent = '📋 Copy Markdown';
+                    this.style.backgroundColor = '';
+                }}, 2000);
+            }} catch (err) {{
+                alert('Failed to copy. Please copy manually.');
+            }}
+            document.body.removeChild(textarea);
+        }});"
+        style="
+            padding: 6px 12px;
+            margin: 8px 0;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: sans-serif;
+        "
+        onmouseover="this.style.backgroundColor='#0056b3'"
+        onmouseout="this.style.backgroundColor='#007bff'"
+    >
+        📋 Copy Markdown
+    </button>
+    """
+
+    # Display Markdown instructions with copy button.
     display(HTML("<strong>Markdown to copy into a new markdown cell:</strong>"))
     # Render as <code> block; escaping minimal HTML special chars.
     safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     display(HTML(f"<code>{safe_md}</code>"))
+    display(HTML(copy_button_html))
     display(HTML("<strong>Preview (for reference only):</strong>"))
 
     try:
@@ -263,7 +317,7 @@ def _display_captured_image(dest_path: str) -> None:
     except Exception as exc:  # pragma: no cover - environment/display specific
         print(f"Could not display image preview: {exc}")
 
-    print("Copy this markdown into a new markdown cell:")
+    print("Markdown (click button above to copy, or copy manually):")
     print(md)
 
 
