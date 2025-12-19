@@ -2,16 +2,21 @@
 Supernote Canvas: capture Supernote tablet sketches into Jupyter notebooks.
 
 Provides a `%diagram` line magic that:
-- Shows an iframe with your Supernote web UI.
-- Lets you capture the latest screenshot from a folder (default: ~/Desktop).
-- Copies it into a `diagrams/` folder in the current working directory.
+- Shows an iframe with your Supernote web UI (live view).
+- Captures screenshots via multiple methods (priority order):
+  1. USB/ADB capture (local environments, default)
+  2. File upload widget (remote environments like Colab)
+  3. Folder-based capture (local fallback, looks in ~/Desktop)
+- Copies captured images into a `diagrams/` folder in the current working directory.
 - Prints ready-to-use Markdown plus a preview image.
 """
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
+import subprocess
 from datetime import datetime
 from typing import Optional
 
@@ -24,6 +29,7 @@ SUPERNOTE_URL: str = os.getenv(
 )
 SCREENSHOT_DIR: str = os.path.expanduser("~/Desktop")
 DIAGRAM_DIR: str = "diagrams"
+ADB_DEVICE_SERIAL: Optional[str] = os.getenv("SUPERNOTE_CANVAS_ADB_DEVICE", None)
 
 
 def _in_ipython() -> bool:
@@ -74,6 +80,193 @@ def latest_screenshot(path: str) -> Optional[str]:
     return _latest_screenshot(path)
 
 
+def _is_adb_available() -> bool:
+    """Return True if ADB is available in PATH."""
+    try:
+        result = subprocess.run(
+            ["adb", "version"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _is_device_connected() -> bool:
+    """Return True if an ADB device is connected."""
+    if not _is_adb_available():
+        return False
+
+    try:
+        cmd = ["adb", "devices"]
+        if ADB_DEVICE_SERIAL:
+            cmd.extend(["-s", ADB_DEVICE_SERIAL])
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+
+        # Parse output: should have at least one device line (not just "List of devices")
+        lines = result.stdout.strip().split("\n")[1:]  # Skip header
+        devices = [line for line in lines if line.strip() and "device" in line]
+        return len(devices) > 0
+    except (subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def _capture_via_adb() -> Optional[bytes]:
+    """
+    Capture screenshot via ADB and return as bytes, or None on failure.
+
+    Uses `adb exec-out screencap -p` to capture directly to stdout.
+    """
+    if not _is_adb_available() or not _is_device_connected():
+        return None
+
+    try:
+        cmd = ["adb"]
+        if ADB_DEVICE_SERIAL:
+            cmd.extend(["-s", ADB_DEVICE_SERIAL])
+        cmd.extend(["exec-out", "screencap", "-p"])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=10,
+            check=True,
+        )
+        if result.stdout and len(result.stdout) > 0:
+            return result.stdout
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, Exception):
+        pass
+
+    return None
+
+
+def _is_remote_environment() -> bool:
+    """
+    Detect if running in a remote/hosted environment (Colab, JupyterHub, etc.).
+
+    Checks for common indicators of remote environments.
+    """
+    # Check for Colab
+    try:
+        import google.colab  # type: ignore
+        return True
+    except ImportError:
+        pass
+
+    # Check for JupyterHub (common env vars)
+    if os.getenv("JUPYTERHUB_USER") or os.getenv("JUPYTERHUB_API_URL"):
+        return True
+
+    # Check if we can't access local filesystem reliably
+    # (heuristic: if ADB device check fails and we're not on a typical local path)
+    # This is a fallback heuristic
+    return False
+
+
+def _process_and_save_image(
+    image_data: bytes, source_path: Optional[str] = None
+) -> Optional[str]:
+    """
+    Process image data and save to diagrams folder.
+
+    Args:
+        image_data: Image bytes to save
+        source_path: Optional source file path (for extension detection)
+
+    Returns:
+        Path to saved file, or None on failure.
+    """
+    # Determine extension
+    if source_path:
+        src_ext = os.path.splitext(source_path)[1] or ".png"
+    else:
+        # Try to detect from image data, default to PNG
+        src_ext = ".png"
+        try:
+            from PIL import Image  # type: ignore
+
+            with Image.open(io.BytesIO(image_data)) as img:
+                # Map PIL format to extension
+                format_map = {"PNG": ".png", "JPEG": ".jpg", "JPEG2000": ".jpg"}
+                src_ext = format_map.get(img.format, ".png")
+        except Exception:
+            pass
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"diagram_{timestamp}{src_ext}"
+
+    try:
+        os.makedirs(DIAGRAM_DIR, exist_ok=True)
+    except OSError as exc:
+        print(f"Could not create diagrams directory '{DIAGRAM_DIR}': {exc}")
+        return None
+
+    dest_path = os.path.join(DIAGRAM_DIR, filename)
+
+    try:
+        # Write image data to file
+        with open(dest_path, "wb") as f:
+            f.write(image_data)
+
+        # Attempt to honor EXIF orientation flags using Pillow, if available.
+        try:
+            from PIL import Image, ImageOps  # type: ignore
+
+            try:
+                with Image.open(dest_path) as img:
+                    rotated = ImageOps.exif_transpose(img)
+                    rotated.save(dest_path)
+            except Exception as exc:
+                # If anything goes wrong with EXIF-based rotation, continue without failing.
+                print(f"Could not apply EXIF-based rotation: {exc}")
+        except Exception:
+            # Pillow is not installed or failed to import; skip EXIF handling.
+            pass
+
+        return dest_path
+    except OSError as exc:
+        print(f"Failed to save image to '{dest_path}': {exc}")
+        return None
+
+
+def _display_captured_image(dest_path: str) -> None:
+    """Display the captured image with Markdown instructions."""
+    # Lazy import for display functions
+    try:
+        from IPython.display import HTML, Image as IPImage, display  # type: ignore
+    except Exception:
+        print("Failed to import display dependencies")
+        return
+
+    # Build Markdown pointing to the new file.
+    md = f"![Diagram]({dest_path})"
+
+    # Display Markdown instructions and preview.
+    display(HTML("<strong>Markdown to copy into a new markdown cell:</strong>"))
+    # Render as <code> block; escaping minimal HTML special chars.
+    safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    display(HTML(f"<code>{safe_md}</code>"))
+    display(HTML("<strong>Preview (for reference only):</strong>"))
+
+    try:
+        display(IPImage(filename=dest_path, width=800))
+    except Exception as exc:  # pragma: no cover - environment/display specific
+        print(f"Could not display image preview: {exc}")
+
+    print("Copy this markdown into a new markdown cell:")
+    print(md)
+
+
 def draw() -> None:
     """
     Build and display the Supernote Canvas UI widget.
@@ -94,6 +287,25 @@ def draw() -> None:
         print("Failed to import Jupyter display dependencies:", exc)
         return
 
+    # Detect environment and available methods
+    is_remote = _is_remote_environment()
+    adb_available = _is_adb_available() and _is_device_connected()
+
+    # Build instruction text based on environment
+    if is_remote:
+        instruction_text = (
+            "Draw on your Supernote. Click <strong>📸 Capture</strong> to upload a screenshot."
+        )
+    elif adb_available:
+        instruction_text = (
+            "Draw on your Supernote. Click <strong>📸 Capture</strong> to capture via USB."
+        )
+    else:
+        instruction_text = (
+            "Draw on your Supernote, then take an OS screenshot (Cmd/Ctrl+Shift+4). "
+            "Click <strong>📸 Capture</strong> when ready."
+        )
+
     # Build iframe HTML with a small heading and instructions.
     iframe_html = f"""
     <div style="border: 1px solid #ccc; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
@@ -101,8 +313,7 @@ def draw() -> None:
         Supernote Canvas
       </h4>
       <p style="margin: 4px 0 10px; font-family: sans-serif; font-size: 13px; color: #555;">
-        Draw on your Supernote, then take an OS screenshot (Cmd/Ctrl+Shift+4).
-        When you are ready, click <strong>📸 Capture latest screenshot</strong> below.
+        {instruction_text}
       </p>
       <iframe
         src="{SUPERNOTE_URL}"
@@ -116,9 +327,9 @@ def draw() -> None:
     iframe = widgets.HTML(value=iframe_html)
 
     capture_btn = widgets.Button(
-        description="📸 Capture latest screenshot",
+        description="📸 Capture",
         button_style="primary",
-        tooltip="Copy the most recent screenshot into ./diagrams and show Markdown.",
+        tooltip="Capture screenshot and save to ./diagrams folder.",
     )
     close_btn = widgets.Button(
         description="❌ Close",
@@ -126,88 +337,112 @@ def draw() -> None:
         tooltip="Close this Supernote Canvas panel.",
     )
 
+    # Add file upload widget for remote environments
+    upload_widget = None
+    if is_remote:
+        upload_widget = widgets.FileUpload(
+            accept="image/*",
+            multiple=False,
+            description="Upload screenshot",
+            button_style="info",
+        )
+
     output = widgets.Output()
 
-    container = widgets.VBox(
-        children=[
-            iframe,
+    # Build container children
+    container_children = [iframe]
+    if is_remote and upload_widget:
+        container_children.append(
+            widgets.HBox(
+                [capture_btn, upload_widget, close_btn],
+                layout=widgets.Layout(padding="10px 0 10px 0"),
+            )
+        )
+    else:
+        container_children.append(
             widgets.HBox(
                 [capture_btn, close_btn],
                 layout=widgets.Layout(padding="10px 0 10px 0"),
-            ),
-            output,
-        ],
+            )
+        )
+    container_children.append(output)
+
+    container = widgets.VBox(
+        children=container_children,
         layout=widgets.Layout(border="1px solid #ddd", padding="6px"),
     )
 
     def _on_capture_click(_btn: widgets.Button) -> None:
-        """Handle the Capture button click."""
+        """Handle the Capture button click with priority-based method selection."""
         output.clear_output()
 
         with output:
-            src = _latest_screenshot(SCREENSHOT_DIR)
-            if src is None:
-                print(
-                    f"No screenshot files found in '{SCREENSHOT_DIR}'.\n"
-                    "Make sure you have taken a screenshot as .png, .jpg, or .jpeg."
-                )
+            image_data: Optional[bytes] = None
+            source_path: Optional[str] = None
+            capture_method = ""
+
+            # Priority 1: Try ADB capture (local environments only)
+            if not is_remote and adb_available:
+                print("Capturing via USB (ADB)...")
+                image_data = _capture_via_adb()
+                if image_data:
+                    capture_method = "USB (ADB)"
+                    print(f"✓ Captured via {capture_method}")
+
+            # Priority 2: Try file upload (remote environments)
+            if image_data is None and is_remote and upload_widget:
+                if upload_widget.value:
+                    # Get the first (and only) uploaded file
+                    uploaded_file = list(upload_widget.value.values())[0]
+                    image_data = uploaded_file["content"]
+                    source_path = uploaded_file.get("metadata", {}).get("name", "")
+                    capture_method = "file upload"
+                    print(f"✓ Captured via {capture_method}")
+
+            # Priority 3: Fallback to folder-based method (local environments)
+            if image_data is None and not is_remote:
+                print("Trying folder-based capture...")
+                src = _latest_screenshot(SCREENSHOT_DIR)
+                if src:
+                    try:
+                        with open(src, "rb") as f:
+                            image_data = f.read()
+                        source_path = src
+                        capture_method = "folder"
+                        print(f"✓ Captured via {capture_method} from '{SCREENSHOT_DIR}'")
+                    except OSError as exc:
+                        print(f"Failed to read screenshot file: {exc}")
+
+            # If we still don't have image data, show error
+            if image_data is None:
+                if is_remote:
+                    print(
+                        "No screenshot uploaded.\n"
+                        "Please use the file upload widget above to select a screenshot file."
+                    )
+                else:
+                    if adb_available:
+                        print(
+                            f"ADB capture failed. No screenshot files found in '{SCREENSHOT_DIR}'.\n"
+                            "Make sure you have taken a screenshot as .png, .jpg, or .jpeg, "
+                            "or check your USB connection."
+                        )
+                    else:
+                        print(
+                            f"No screenshot files found in '{SCREENSHOT_DIR}'.\n"
+                            "Make sure you have taken a screenshot as .png, .jpg, or .jpeg."
+                        )
                 return
 
-            # Determine destination path and extension.
-            src_ext = os.path.splitext(src)[1] or ".png"
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"diagram_{timestamp}{src_ext}"
-
-            try:
-                os.makedirs(DIAGRAM_DIR, exist_ok=True)
-            except OSError as exc:
-                print(f"Could not create diagrams directory '{DIAGRAM_DIR}': {exc}")
+            # Process and save the image
+            dest_path = _process_and_save_image(image_data, source_path)
+            if dest_path is None:
                 return
 
-            dest_path = os.path.join(DIAGRAM_DIR, filename)
-
-            try:
-                shutil.copy2(src, dest_path)
-            except OSError as exc:
-                print(f"Failed to copy screenshot to '{dest_path}': {exc}")
-                return
-
-            # Attempt to honor EXIF orientation flags using Pillow, if available.
-            try:
-                from PIL import Image, ImageOps  # type: ignore
-
-                try:
-                    with Image.open(dest_path) as img:
-                        rotated = ImageOps.exif_transpose(img)
-                        rotated.save(dest_path)
-                except Exception as exc:
-                    # If anything goes wrong with EXIF-based rotation, continue without failing.
-                    print(f"Could not apply EXIF-based rotation: {exc}")
-            except Exception:
-                # Pillow is not installed or failed to import; skip EXIF handling.
-                pass
-
-            # Build Markdown pointing to the new file.
-            md = f"![Diagram]({dest_path})"
-
-            # Display Markdown instructions and preview.
-            display(HTML("<strong>Markdown to copy into a new markdown cell:</strong>"))
-            # Render as <code> block; escaping minimal HTML special chars.
-            safe_md = (
-                md.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-            display(HTML(f"<code>{safe_md}</code>"))
-            display(HTML("<strong>Preview (for reference only):</strong>"))
-
-            try:
-                display(IPImage(filename=dest_path, width=800))
-            except Exception as exc:  # pragma: no cover - environment/display specific
-                print(f"Could not display image preview: {exc}")
-
-            print("Copy this markdown into a new markdown cell:")
-            print(md)
+            # Display the result
+            if capture_method:
+                print(f"Captured via {capture_method}\n")
+            _display_captured_image(dest_path)
 
     def _on_close_click(_btn: widgets.Button) -> None:
         """Handle the Close button click: close the container widget."""
