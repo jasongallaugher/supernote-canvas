@@ -361,6 +361,9 @@ def draw() -> None:
         )
 
     # Build iframe HTML with a small heading and instructions.
+    # Include a refresh button to reload the iframe (helps with browser security prompts)
+    import time
+    iframe_id = f"supernote_iframe_{int(time.time() * 1000)}"
     iframe_html = f"""
     <div style="border: 1px solid #ccc; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
       <h4 style="margin-top: 0; font-family: sans-serif;">
@@ -369,11 +372,32 @@ def draw() -> None:
       <p style="margin: 4px 0 10px; font-family: sans-serif; font-size: 13px; color: #555;">
         {instruction_text}
       </p>
+      <button 
+        onclick="document.getElementById('{iframe_id}').src = document.getElementById('{iframe_id}').src;"
+        style="
+          padding: 4px 8px;
+          margin-bottom: 8px;
+          background-color: #f8f9fa;
+          border: 1px solid #ddd;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 12px;
+          font-family: sans-serif;
+        "
+        onmouseover="this.style.backgroundColor='#e9ecef'"
+        onmouseout="this.style.backgroundColor='#f8f9fa'"
+      >
+        🔄 Refresh iframe
+      </button>
       <iframe
+        id="{iframe_id}"
         src="{SUPERNOTE_URL}"
         width="100%"
         height="600px"
         style="border: 1px solid #aaa; border-radius: 4px;"
+        allow="camera; microphone; fullscreen"
+        referrerpolicy="no-referrer-when-downgrade"
+        loading="lazy"
       ></iframe>
     </div>
     """
