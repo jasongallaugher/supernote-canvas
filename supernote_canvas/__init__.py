@@ -249,8 +249,35 @@ def _display_captured_image(dest_path: str) -> None:
         print("Failed to import display dependencies")
         return
 
+    # Get absolute path
+    abs_path = os.path.abspath(dest_path)
+    
+    # For Colab, markdown cells need /content/ prefix
+    # For other environments, use absolute path
+    try:
+        import google.colab  # type: ignore
+        # In Colab, ensure path uses /content/ format
+        if abs_path.startswith("/content/"):
+            md_path = abs_path
+        else:
+            # Convert to /content/ relative path if we're in Colab
+            cwd = os.getcwd()
+            if cwd.startswith("/content"):
+                # Get relative path from /content
+                try:
+                    rel_path = os.path.relpath(abs_path, "/content")
+                    md_path = f"/content/{rel_path}"
+                except ValueError:
+                    # Path is not under /content, use absolute
+                    md_path = abs_path
+            else:
+                md_path = abs_path
+    except ImportError:
+        # Not in Colab, use absolute path
+        md_path = abs_path
+    
     # Build Markdown pointing to the new file.
-    md = f"![Diagram]({dest_path})"
+    md = f"![Diagram]({md_path})"
 
     # Escape markdown for JavaScript using JSON encoding (safest method)
     js_safe_md = json.dumps(md)
@@ -310,6 +337,15 @@ def _display_captured_image(dest_path: str) -> None:
     safe_md = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     display(HTML(f"<code>{safe_md}</code>"))
     display(HTML(copy_button_html))
+    
+    # Also provide HTML alternative for Colab (markdown may not work with local files)
+    try:
+        import google.colab  # type: ignore
+        html_alt = f'<img src="{md_path}" alt="Diagram" style="max-width: 100%;">'
+        display(HTML("<strong>Or use this HTML in a code cell:</strong>"))
+        display(HTML(f"<code>{html_alt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</code>"))
+    except ImportError:
+        pass
     display(HTML("<strong>Preview (for reference only):</strong>"))
 
     try:
@@ -317,8 +353,6 @@ def _display_captured_image(dest_path: str) -> None:
     except Exception as exc:  # pragma: no cover - environment/display specific
         print(f"Could not display image preview: {exc}")
 
-    print("Markdown (click button above to copy, or copy manually):")
-    print(md)
 
 
 def draw() -> None:
@@ -520,11 +554,9 @@ def draw() -> None:
 
             # Priority 1: Try ADB capture (local environments only)
             if not is_remote and adb_available:
-                print("Capturing via USB (ADB)...")
                 image_data = _capture_via_adb()
                 if image_data:
                     capture_method = "USB (ADB)"
-                    print(f"✓ Captured via {capture_method}")
 
             # Priority 2: Try file upload (remote environments)
             if image_data is None and is_remote and upload_widget:
@@ -548,15 +580,11 @@ def draw() -> None:
                                 
                                 if image_data:
                                     capture_method = "file upload"
-                                    print(f"✓ Captured via {capture_method}")
                 except Exception as exc:
                     print(f"Error reading uploaded file: {exc}")
-                    import traceback
-                    traceback.print_exc()
 
             # Priority 3: Fallback to folder-based method (local environments)
             if image_data is None and not is_remote:
-                print("Trying folder-based capture...")
                 src = _latest_screenshot(SCREENSHOT_DIR)
                 if src:
                     try:
@@ -564,7 +592,6 @@ def draw() -> None:
                             image_data = f.read()
                         source_path = src
                         capture_method = "folder"
-                        print(f"✓ Captured via {capture_method} from '{SCREENSHOT_DIR}'")
                     except OSError as exc:
                         print(f"Failed to read screenshot file: {exc}")
 
@@ -595,8 +622,6 @@ def draw() -> None:
                 return
 
             # Display the result
-            if capture_method:
-                print(f"Captured via {capture_method}\n")
             _display_captured_image(dest_path)
 
     def _on_close_click(_btn: widgets.Button) -> None:
