@@ -399,16 +399,65 @@ def draw() -> None:
       <p style="margin: 4px 0 8px; font-family: sans-serif; font-size: 11px; color: #999;">
         If blocked, try: reload the Jupyter page (Cmd/Ctrl+R) or use Chrome with <code>--allow-running-insecure-content</code>
       </p>
-      <iframe
-        id="{iframe_id}"
-        src="{SUPERNOTE_URL}"
-        width="100%"
-        height="600px"
-        style="border: 1px solid #aaa; border-radius: 4px;"
-        allow="camera; microphone; fullscreen"
-        referrerpolicy="no-referrer-when-downgrade"
-        loading="lazy"
-      ></iframe>
+      <div id="{iframe_id}_container" style="position: relative; width: 100%;">
+        <button 
+          onclick="
+            const container = document.getElementById('{iframe_id}_container');
+            const iframe = document.getElementById('{iframe_id}');
+            if (container.style.position === 'fixed') {{
+              // Exit fullscreen
+              container.style.position = 'relative';
+              container.style.top = 'auto';
+              container.style.left = 'auto';
+              container.style.width = '100%';
+              container.style.height = 'auto';
+              container.style.zIndex = 'auto';
+              container.style.backgroundColor = 'transparent';
+              iframe.style.height = '80vh';
+              this.textContent = '⛶ Fullscreen';
+            }} else {{
+              // Enter fullscreen
+              container.style.position = 'fixed';
+              container.style.top = '0';
+              container.style.left = '0';
+              container.style.width = '100vw';
+              container.style.height = '100vh';
+              container.style.zIndex = '9999';
+              container.style.backgroundColor = 'rgba(0,0,0,0.9)';
+              iframe.style.height = '100vh';
+              this.textContent = '✕ Exit Fullscreen';
+            }}
+          "
+          style="
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 6px 12px;
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: sans-serif;
+            z-index: 10000;
+          "
+          onmouseover="this.style.backgroundColor='rgba(0,0,0,0.9)'"
+          onmouseout="this.style.backgroundColor='rgba(0,0,0,0.7)'"
+        >
+          ⛶ Fullscreen
+        </button>
+        <iframe
+          id="{iframe_id}"
+          src="{SUPERNOTE_URL}"
+          width="100%"
+          height="80vh"
+          style="border: 1px solid #aaa; border-radius: 4px; min-height: 600px;"
+          allow="camera; microphone; fullscreen"
+          referrerpolicy="no-referrer-when-downgrade"
+          loading="lazy"
+        ></iframe>
+      </div>
     </div>
     """
 
